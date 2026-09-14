@@ -1,11 +1,11 @@
-#include <stdio.h>      // printf, fprintf, perror
-#include <stdlib.h>     // exit, EXIT_FAILURE
-#include <string.h>     // strlen, memset
-#include <sys/socket.h> // socket, connect
-#include <netdb.h>      // getaddrinfo, freeaddrinfo, struct addrinfo
-#include <unistd.h>     // usleep, close
-#include <fcntl.h>      // fcntl
-#include <sys/time.h>   // gettimeofday
+#include <stdio.h>      
+#include <stdlib.h>     
+#include <string.h>     
+#include <sys/socket.h>
+#include <netdb.h>     
+#include <unistd.h>
+#include <fcntl.h>      
+#include <sys/time.h> 
 
 #define CHUNK_SIZE 1024
 
@@ -48,7 +48,7 @@ int recv_timeout(int s, int timeout)
 
 int main(int argc, char *argv[])
 {
-    int socket_desc;
+    int socketfd;
     struct addrinfo hints, *res;
     char message[512];
 
@@ -60,10 +60,10 @@ int main(int argc, char *argv[])
 
     char *target = argv[1];
 
-    // Configure criteria for target resolution
+    
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;       // IPv4
-    hints.ai_socktype = SOCK_STREAM; // TCP stream socket
+    hints.ai_family = AF_INET;       
+    hints.ai_socktype = SOCK_STREAM; 
 
     // getaddrinfo converts IP string OR resolves domain name automatically
     int status = getaddrinfo(target, "80", &hints, &res);
@@ -73,9 +73,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Create socket using the resolved protocol details
-    socket_desc = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (socket_desc == -1)
+
+    socketfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (socketfd == -1)
     {
         perror("Could not create socket");
         freeaddrinfo(res);
@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
     }
 
     // Connect to target address
-    if (connect(socket_desc, res->ai_addr, res->ai_addrlen) < 0)
+    if (connect(socketfd, res->ai_addr, res->ai_addrlen) < 0)
     {
         perror("Connect error");
         freeaddrinfo(res);
@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
              "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
              target);
 
-    if (send(socket_desc, message, strlen(message), 0) < 0)
+    if (send(socketfd, message, strlen(message), 0) < 0)
     {
         perror("Send failed");
         exit(EXIT_FAILURE);
@@ -107,9 +107,9 @@ int main(int argc, char *argv[])
     puts("Data Sent\n");
 
     // Receive incoming data
-    int total_recv = recv_timeout(socket_desc, 4);
+    int total_recv = recv_timeout(socketfd, 4);
 
     printf("\n\nDone. Received a total of %d bytes\n\n", total_recv);
-    close(socket_desc);
+    close(socketfd);
     return 0;
 }
