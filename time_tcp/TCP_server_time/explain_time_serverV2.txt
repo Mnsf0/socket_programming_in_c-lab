@@ -1,0 +1,97 @@
+```c
+static int parse_port(const char *arg) {
+    char *endptr;
+    errno = 0;
+    long val = strtol(arg, &endptr, 10);
+
+    if (errno != 0 || *endptr != '\0' || endptr == arg) {
+        fprintf(stderr, "[-]Invalid port: '%s' is not a number\n", arg);
+        return -1;
+    }
+    if (val < 1 || val > 65535) {
+        fprintf(stderr, "[-]Invalid port: %ld (must be 1-65535)\n", val);
+        return -1;
+    }
+    return (int)val;
+}
+```
+this function do two things.
+1-first if statement to check wehter the port number is valid  or not by three different cases 
+ - endptr = arg, (there's no number at all)
+ - endptr != '\0', part of it was number
+ - errno != 0, number too big or too small
+ 2-second if to check the port range 
+ --------------------------------------------------------
+ 
+```c
+static int send_all(int fd, const char *buf, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, buf + sent, len - sent, 0);
+        if (n == -1) {
+            if (errno == EINTR) 
+            continue; 
+            return -1;
+        }
+        sent += (size_t)n;
+    }
+    return 0;
+}
+```
+
+```c
+ signal(SIGPIPE, SIG_IGN);
+```
+two reasons behind this code.
+1- check all the data was send succefully 
+2- in case the connection was cut off because the system or wi-fi for example, the program won't kill it slef or send error it gonna try another time
+
+-------------------------------------------------
+
+```c
+    socket_address.sin_port = htons((uint16_t)port);
+```
+in simple words
+port is a normal int (bigger box, can hold negative numbers or huge numbers).
+htons() needs a uint16_t (smaller box, only 0–65535).
+Putting a bigger box's value into a smaller box without saying so makes the compiler nervous and warn you.
+(uint16_t)port just tells the compiler "I'm doing this shrink on purpose.
+
+--------------------------------
+
+```c
+ char time_buf[64];
+        const char *ct = ctime(&currentTime);
+        if (ct == NULL) {
+            snprintf(time_buf, sizeof(time_buf), "unknown time\n");
+        } else {
+            snprintf(time_buf, sizeof(time_buf), "%s", ct);
+        }
+        size_t time_len = strlen(time_buf);
+
+        printf("Client:%d requested for time at %s", number_of_clients, time_buf);
+
+        if (send_all(client_socket, time_buf, time_len) == -1) {
+            perror("[-]SEND");
+            close(client_socket);
+            continue;
+        }
+        printf("[+]SEND\n");
+
+        close(client_socket);
+```
+let's explain this 
+
+```c
+const char *ct = ctime(&currentTime);
+```
+this line is to convert the time to human readable langauge 
+
+```c
+ size_t time_len = strlen(time_buf);
+```
+is used to check the size of the time to send it over TCP
+
+--------------------------------------------------------------
+
+
