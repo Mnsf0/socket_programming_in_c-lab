@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netdb.h>
+#include <signal.h>
 
 #define INITIAL_BUF_SIZE 256
 #define MAX_MSG_SIZE     4096
@@ -27,7 +28,7 @@ static void print_sanitized(const char *buf, size_t len){
 static int send_all(int fd, const char *buf, size_t len){
   size_t sent = 0;
   while(sent < len){
-    ssize_t n = send(fd, buf + sent, len - sent, 0);
+    ssize_t n = send(fd, buf + sent, len - sent, MSG_DONTWAIT);
     if(n == -1){
       if(errno == EINTR) continue;
       return -1;
@@ -44,7 +45,35 @@ void* check_addr(struct sockaddr* sa) {
     return &(((struct sockaddr_in6*) sa)->sin6_addr);
 }
 
+static const char *server_token;
+static size_t token_len;
+static char authed[FD_SETSIZE];
+
+static int ct_equal(const char *a, const char *b, size_t n){
+  unsigned char diff = 0;
+  for(size_t i = 0; i < n; i++){
+    diff |= (unsigned char)a[i] ^ (unsigned char)b[i];
+  }
+  return diff == 0;
+}
+
+static int check_auth(const char *buf, size_t len){
+  while(len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) len--;
+  if(len != 5 + token_len) return 0;
+  if(memcmp(buf, "AUTH ", 5) != 0) return 0;
+  return ct_equal(buf + 5, server_token, token_len);
+}
+
 int main(void) {
+    signal(SIGPIPE, SIG_IGN);
+
+    server_token = getenv("CHAT_TOKEN");
+    if (server_token == NULL || strlen(server_token) < 16) {
+        fprintf(stderr, "CHAT_TOKEN must be set (at least 16 characters)\n");
+        exit(5);
+    }
+    token_len = strlen(server_token);
+
     fd_set list, read_list;
     int max_set;
 
@@ -115,23 +144,26 @@ int main(void) {
             if (FD_ISSET(i, &read_list)) {
 
                 if (i == listener) {
-                    // Accept new client connection
                     addrlen = sizeof(client_addr);
                     client = accept(listener, (struct sockaddr *)&client_addr, &addrlen);
                     if (client == -1) {
                         perror("[-]accept");
+                    } else if (client >= FD_SETSIZE) {
+                        fprintf(stderr, "rejecting connection: fd %d >= FD_SETSIZE (%d)\n",
+                                client, FD_SETSIZE);
+                        close(client);
                     } else {
                         FD_SET(client, &list);
+                        authed[client] = 0;
                         if (client > max_set) {
                             max_set = client;
                         }
                         printf("select server: new connection on socket %d\n", client);
                     }
                 } else {
-                    // Receive incoming client message (as chunks)
                     size_t cap = INITIAL_BUF_SIZE;
                     size_t total = 0;
-                    char *buf = malloc(cap); // using heap
+                    char *buf = malloc(cap);
 
                     if (buf == NULL) {
                         perror("[-]malloc failed\n");
@@ -143,15 +175,10 @@ int main(void) {
                     int too_big = 0;
                     int hung_up = 0;
                     ssize_t n;
-                    // MSG_DONTWAIT so the loop ends when no more data is ready
-                    // instead of blocking the whole select() server
                     while ((n = recv(i, buf + total, cap - total, MSG_DONTWAIT)) > 0) {
-                        // add received data to the total
                         total += n;
 
-                        // buffer is full, need more room before next recv()
                         if (total == cap) {
-                            // even with multiple chunks the message is too long
                             if (cap >= MAX_MSG_SIZE) {
                                 printf("message exceeded max allowed size (%d bytes), aborting\n", MAX_MSG_SIZE);
                                 too_big = 1;
@@ -192,7 +219,6 @@ int main(void) {
                         continue;
                     }
 
-                    // null terminate safely (make sure there's at least 1 spare byte)
                     if (total == cap) {
                         char *tmp = realloc(buf, cap + 1);
                         if (tmp == NULL) {
@@ -206,15 +232,31 @@ int main(void) {
                     }
                     buf[total] = '\0';
 
+                    if (total > 0 && !authed[i]) {
+                        if (check_auth(buf, total)) {
+                            authed[i] = 1;
+                            total = 0;
+                            printf("select server: socket %d authenticated\n", i);
+                        } else {
+                            printf("select server: socket %d failed authentication\n", i);
+                            free(buf);
+                            close(i);
+                            FD_CLR(i, &list);
+                            continue;
+                        }
+                    }
+
                     if (total > 0) {
                         print_sanitized(buf, total);
 
-                        // Broadcast message to all other connected clients
                         for (int j = 0; j <= max_set; j++) {
                             if (FD_ISSET(j, &list)) {
-                                if (j != listener && j != i) {
+                                if (j != listener && j != i && authed[j]) {
                                     if (send_all(j, buf, total) == -1) {
-                                        perror("[-]send");
+                                        fprintf(stderr, "dropping socket %d: %s\n", j, strerror(errno));
+                                        close(j);
+                                        FD_CLR(j, &list);
+                                        FD_CLR(j, &read_list);
                                     }
                                 }
                             }
