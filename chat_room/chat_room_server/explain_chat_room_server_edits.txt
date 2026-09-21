@@ -1,0 +1,115 @@
+this file gonna include every change that I made at chat_room_serverV2, with explinantion why I did it? what happened if I didn't do it, and how to fix it.
+
+
+# 1
+##### CWE 306
+it's just normall token analogy, to acheive authenticaiton, so I will jump straight to how I applied on the code.
+```c
+static const char *server_token;
+static size_t token_len;
+static char authed[FD_SETSIZE];
+}
+```
+- \*server token : pointer to the token
+- token_len : length of the token to validate the user's tokens 
+- authed\[FD_SETSIZE] : normally FD_SETSIZE = 1020, which is the highest number of client's the porgram can serve, so I made  a per-socket flag
+
+```c
+static int ct_equal(const char *a, const char *b, size_t n){
+  unsigned char diff = 0;
+  for(size_t i = 0; i < n; i++){
+    diff |= (unsigned char)a[i] ^ (unsigned char)b[i];
+  }
+  return diff == 0;
+}
+```
+a : is the client token
+*b : server token, to compare between them
+n : size of token
+explain the mechanism of the code, simply it just check to tokens are they same as each other or not?
+\| = OR gate
+\^ = XOR gate
+I prefer to explain by examples rather than use words. I will use 4 bits for the examples, but in real words it's 8 bits
+ex :
+1-server token = 1001, client token = 1011, (1001) XOR (1011) = 0010,
+(0010) OR (0000) = 0010, (0010) != 0000, return false.
+2-server token = 1110, client token = 1110, (1110) XOR (1110) = 0000,
+(0000) OR (0000) = 0000, (0000) == 0000, return true.
+
+but why I use this way? Why not normal loop and check index by index? because there's an attack we call a timing side-channel attack. What is it?
+imagen this scenario with me, server token = 1000, client token = 0111.
+if the attacker try to make a brute-force attack and I check the tokens index by index the loop will get out from the first index, so it will end the checking in 1ns,
+another scenario, server token = 0100(second char), client token = 0011(second char), the authentication will return false in second index that's mean in 2ns, and so on 3ns(third char) for third index, 4ns(forth char) for 4 index, based on these info the attacket could know where the authenticaiton falied and they can change that index to true, when we use OR and XOR method we prevent this from happining because we always check all the index not until first false index,
+```c
+static int check_auth(const char *buf, size_t len){
+  while(len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) len--;
+  if(len != 5 + token_len) return 0;
+  if(memcmp(buf, "AUTH ", 5) != 0) return 0;
+  return ct_equal(buf + 5, server_token, token_len);
+}
+```
+
+simply all message clients sent ends with \n or \r, so we remove to check the token only, also all the tokens start by AUTH, with white space that's equall to 5 index so we jump them when we want to comparission tokens 
+
+```c
+   authed[client] = 0;
+```
+following zero trust model, by default any user it's not authenticated until the the oppisote proved 
+
+-- --------------------------------------------
+
+# 2
+##### CWE-787
+this vulnerability is common one on programing, point to my code it happened when I use fd_set, how?
+by default each list I made it by fd_set has an FD_SETSIZE, normally it equal to 1024, that's mean each list can handle up to 1024 connection, the problem in my code that I didn't check if I exceed this number or not so any attacker want to crack my code it need just to make a number of active connection bigger than FD_SETSIZE to exploit this vulnerability. What if the attacker exceed this number what gonna happened? 
+we call this out of bounds write, no one could tell you what exactly gonna happened, the code will do an unexpected behavior, but usally one of these three action will happened.
+1-Data Courption
+2-DOS attack
+3-Arbitrary Code Execution
+
+How I can fix it?
+```c
+ else if (client >= FD_SETSIZE) {
+ fprintf(stderr, "rejecting connection: fd %d >= FD_SETSIZE (%d)\n",
+ client, FD_SETSIZE);
+ close(client);
+}
+```
+before assign the accept I much chech wither I get to max number of FD_SETSIZE or I'm still at safe side.
+
+--------------------------------------------------------
+
+# 3
+##### CWE-400
+first of all when does this vulnerability trigger on my code? it happened `at send_all()` function, how? basically when clients start sending message to each other, and one of them stop reading while they are in the chat the servent buffer is getting filled since the client not taking the message, so what? since my server chat room is a singal thread that's mean I server many clients at a time, but I have only one serverce to serve them all. When that client buffer get fully no other client could receive a message and the server will refuse any other new conneciton. This causing DOS attack, so what's the solution? simple bass a `MSG_DONTWAIT` flage, when one of the clients stop reading and it's buffer fuilled simple we disconnect the session of the client, and then the server keep delivering the message to the rest of the clients. 
+But why drop instead of skip: a failed send may have delivered only part of a message, so continuing would leave that client with a corrupted stream.
+
+how to fix it.
+```c
+send(fd, buf + sent, len - sent, MSG_DONTWAIT);
+```
+
+```c
+if (send_all(j, buf, total) == -1) {
+    fprintf(stderr, "dropping socket %d: %s\n", j, strerror(errno));
+    close(j);
+    FD_CLR(j, &list);
+    FD_CLR(j, &read_list);
+}
+```
+
+-------------------------------------------------------
+# 4
+##### CWE-248
+what is this vulnerability? simple when a customer disconnect himself out of the session, and the server try to reah him to give him a message and find out he is gone and the server left without instructions to what to do in this caes, that cause server to shut down the whole process.
+how to fix it?
+```c
+ int main(void) {
+   signal(SIGPIPE, SIG_IGN);
+
+     fd_set list, read_list;
+     int max_set;
+```
+and add singal library.
+
+what gonna happened next time the client get out of the connection? it gonna drop the socket and continue normally with other clients 
