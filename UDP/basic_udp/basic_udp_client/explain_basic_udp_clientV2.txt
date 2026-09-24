@@ -1,0 +1,143 @@
+```c
+static int check_port(const char *s) {
+    // strtol() would also accept leading whitespace and +, - signs
+    if (!isdigit((unsigned char)s[0]))
+        return -1;
+
+    char *end;
+    errno = 0;
+    long v = strtol(s, &end, 10);
+    if (errno != 0 || *end != '\0' || v < 1 || v > 65535)
+        return -1;
+    return (int)v;
+}
+```
+this function it check if the port is valid or not, by three carteria, 
+1- chekc if the start of the port is number, this checks faild wiht strtol() for example + 124 and -124 pass the test, because of that I make this if statement at first.
+2-check if the end is not '\0'.
+3-check if number of the port in right range
+
+----------------------------------------------------------------------
+
+```c
+   struct sockaddr_storage local_addr, server_addr;
+```
+use sockaddr_storage rather than sockaddr_in/6, to handle both IP versions.
+
+-----------------------------------------------------
+
+```c
+static int check_IP_version(const char *ip, int port, struct sockaddr_storage *addr, socklen_t *len) {
+    struct sockaddr_in  *addr4 = (struct sockaddr_in *)addr;
+    struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)addr;
+
+    memset(addr, 0, sizeof(*addr));
+    if (inet_pton(AF_INET, ip, &addr4->sin_addr) == 1) {
+        addr4->sin_family = AF_INET;
+        addr4->sin_port = htons((uint16_t)port);
+        *len = sizeof(*addr4);
+        return 0;
+    }
+
+    memset(addr, 0, sizeof(*addr));
+    if (inet_pton(AF_INET6, ip, &addr6->sin6_addr) == 1) {
+        addr6->sin6_family = AF_INET6;
+        addr6->sin6_port = htons((uint16_t)port);
+        *len = sizeof(*addr6);
+        return 0;
+    }
+
+    return -1;
+}
+```
+this function serve the idea of handle both IP versions, it gonna detemined which IP had been sent by the user, check if it's IPv4 or IPv6, set the necassary configuration, and check if it's valid IP address in first place.
+
+
+------------------------------------
+```c
+ if (server_addr.ss_family != local_addr.ss_family) {
+        fprintf(stderr, "[-] Local IP and server IP must be the same version (both IPv4 or both IPv6)\n");
+        exit(EXIT_FAILURE);
+    }
+```
+the purpose of this to check if both of server IP and local IP are the same version to connect to each other.
+
+----------------------
+
+```c
+  
+    int sockfd = socket(local_addr.ss_family, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("[-] SOKCET");
+        exit(EXIT_FAILURE);
+    }
+```
+set UDP socket.
+
+-------------------------------------------------
+
+```c
+ 
+    if (bind(sockfd, (struct sockaddr *)&local_addr, local_addr_len) < 0) {
+        perror("[-] BIND");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+```
+usally there's no need to use bindI() wiht udp, but in this case I use it since I designed my code to get the IP and port from the user.
+
+-------------------------------------------------------
+```c
+ if (connect(sockfd, (struct sockaddr *)&server_addr, server_addr_len) < 0) {
+        perror("[-] CONNECT");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+```
+
+connect() is not required for UDP. I use it so the kernel only delivers datagrams whose source IP and port match the server, so the client doesn't accept replies from other hosts.
+
+---------------------------------------------------
+```c
+struct timeval tv = { .tv_sec = RECV_TIMEOUT_SEC, .tv_usec = 0 };
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("[-] SETSOCKOPT");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+```
+UDP gives no delivery guarantee, and no connection exists to fail. Without a timeout, if the server never replies, the client's recv() blocks the calling thread indefinitely, with no error and no way to recover. The fix makes recv() give up after 5 seconds and return an error the caller can handle, so the client can report the failure and exit instead of hanging forever.
+
+-----------------------------
+```c
+  {
+        char discard[BUFFSIZE];
+        while (recv(sockfd, discard, sizeof(discard), MSG_DONTWAIT) >= 0)
+            ;
+    }
+```
+It empties the socket's receive queue right after connect() and right before sending hello, so any datagram that arrived earlier from an unintended sender is thrown away instead of being mistaken for the server's reply.
+
+----------------------------------------------------
+```c
+  const char msg[] = "hello";
+    if (send(sockfd, msg, strlen(msg), 0) < 0) {
+        perror("[-] SEND");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    char recvbuff[BUFFSIZE + 1];
+    ssize_t n = recv(sockfd, recvbuff, sizeof(recvbuff), 0);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            fprintf(stderr, "[-] Timed out after %d \n", RECV_TIMEOUT_SEC);
+        else
+            perror("[-] RECV");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+```
+
+why I use send() and recv() rather than sendto() and recvfrom(), an unconnected socket using recvfrom() would accept a datagram from **any** sender, and the original code never checked who it came from. connect() makes the kernel discard anything not from the server. Once I made that change, sendto()/recvfrom() no longer made sense, since I'd be passing an address that's already fixed and redundant.
+
