@@ -49,6 +49,26 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
         perror("socket (IPv4/UDP)");
         return -1;
     }
+  //bind so we can actually receive the client's packet instead of just sending blind
+    if (bind(sockfd, (struct sockaddr *)&addr4, sizeof(addr4)) < 0) {
+        perror("bind (IPv4/UDP)");
+        close(sockfd);
+        return -1;
+    }
+    printf("Listening on %s:%d via IPv4...\n", ip, port);
+ 
+    struct sockaddr_in client;
+    socklen_t client_len = sizeof(client);
+    char buf[1024];
+    ssize_t n = recvfrom(sockfd, buf, sizeof(buf) - 1, 0,
+                          (struct sockaddr *)&client, &client_len);
+    if (n < 0) {
+        perror("recvfrom (IPv4/UDP)");
+        close(sockfd);
+        return -1;
+    }
+    buf[n] = '\0';
+    printf("Received %zd bytes from client: %s\n", n, buf);
 
     ssize_t sent = sendto(sockfd, message, strlen(message), 0,
                            (struct sockaddr *)&addr4, sizeof(addr4));
@@ -80,6 +100,27 @@ int setup_ipv6_socket(const char *ip, int port, const char *message) {
         perror("socket (IPv6/UDP)");
         return -1;
     }
+
+   //bind so we can actually receive the client's packet instead of just sending blind
+    if (bind(sockfd, (struct sockaddr *)&addr6, sizeof(addr6)) < 0) {
+        perror("bind (IPv6/UDP)");
+        close(sockfd);
+        return -1;
+    }
+    printf("Listening on %s:%d via IPv6...\n", ip, port);
+ 
+    struct sockaddr_in6 client;
+    socklen_t client_len = sizeof(client);
+    char buf[1024];
+    ssize_t n = recvfrom(sockfd, buf, sizeof(buf) - 1, 0,
+                          (struct sockaddr *)&client, &client_len);
+    if (n < 0) {
+        perror("recvfrom (IPv6/UDP)");
+        close(sockfd);
+        return -1;
+    }
+    buf[n] = '\0';
+    printf("Received %zd bytes from client: %s\n", n, buf);
 
     ssize_t sent = sendto(sockfd, message, strlen(message), 0,
                            (struct sockaddr *)&addr6, sizeof(addr6));
