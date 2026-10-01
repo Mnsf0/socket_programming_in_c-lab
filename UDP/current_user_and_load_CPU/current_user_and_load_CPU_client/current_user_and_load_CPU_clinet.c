@@ -11,6 +11,8 @@
 
 #define BUFFSIZE 1024
 
+#define AUTH_TOKEN "ScioVSIOwQzXCBY26538"
+
 typedef struct current_load {
    int current_user;
    double current_CPU_load;
@@ -103,10 +105,10 @@ int main(int argc, char** argv){
 
 
 
-   int sent = sendto(sockfd, (current_load*)& stats, sizeof(stats),
+   int sent = sendto(sockfd, AUTH_TOKEN, strlen(AUTH_TOKEN),
                      0,(struct sockaddr*)& local_addr, local_addr_len);
 
-  if(sent != sizeof(stats)) {
+  if(sent != strlen(AUTH_TOKEN)) {
 
     fprintf(stderr, "[-]SEND\n");
     exit(EXIT_FAILURE);
