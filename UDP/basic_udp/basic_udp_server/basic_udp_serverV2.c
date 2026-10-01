@@ -39,7 +39,9 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
     addr4.sin_family = AF_INET;
     addr4.sin_port   = htons(port);
 
-    if (inet_pton(AF_INET, ip, &addr4.sin_addr) != 1) {
+    if (ip == NULL) {
+      addr4.sin_addr.s_addr = INADDR_ANY;
+    }else if (inet_pton(AF_INET, ip, &addr4.sin_addr) != 1) {
         fprintf(stderr, "setup_ipv4_socket: invalid IPv4 address\n");
         return -1;
     }
@@ -49,9 +51,13 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
         perror("socket (IPv4/UDP)");
         return -1;
     }
+
+    int yes = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
   //bind so we can actually receive the client's packet instead of just sending blind
     if (bind(sockfd, (struct sockaddr *)&addr4, sizeof(addr4)) < 0) {
-        perror("bind (IPv4/UDP)");
+        perror("[-]bind (IPv4/UDP)");
         close(sockfd);
         return -1;
     }
@@ -63,7 +69,7 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
     ssize_t n = recvfrom(sockfd, buf, sizeof(buf) - 1, 0,
                           (struct sockaddr *)&client, &client_len);
     if (n < 0) {
-        perror("recvfrom (IPv4/UDP)");
+        perror("[-]recvfrom (IPv4/UDP)");
         close(sockfd);
         return -1;
     }
@@ -71,9 +77,9 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
     printf("Received %zd bytes from client: %s\n", n, buf);
 
     ssize_t sent = sendto(sockfd, message, strlen(message), 0,
-                           (struct sockaddr *)&addr4, sizeof(addr4));
+                           (struct sockaddr *)&client, client_len);
     if (sent < 0) {
-        perror("sendto (IPv4/UDP)");
+        perror("[-]sendto (IPv4/UDP)");
         close(sockfd);
         return -1;
     }
@@ -100,7 +106,10 @@ int setup_ipv6_socket(const char *ip, int port, const char *message) {
         perror("socket (IPv6/UDP)");
         return -1;
     }
-
+     
+    int yes = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+  
    //bind so we can actually receive the client's packet instead of just sending blind
     if (bind(sockfd, (struct sockaddr *)&addr6, sizeof(addr6)) < 0) {
         perror("bind (IPv6/UDP)");
@@ -123,7 +132,7 @@ int setup_ipv6_socket(const char *ip, int port, const char *message) {
     printf("Received %zd bytes from client: %s\n", n, buf);
 
     ssize_t sent = sendto(sockfd, message, strlen(message), 0,
-                           (struct sockaddr *)&addr6, sizeof(addr6));
+                           (struct sockaddr *)&client, client_len);
     if (sent < 0) {
         perror("sendto (IPv6/UDP)");
         close(sockfd);
@@ -138,8 +147,11 @@ int setup_ipv6_socket(const char *ip, int port, const char *message) {
 int create_socket_from_ip(const char *ip, int port, const char *message) {
     struct sockaddr_in  test4;
     struct sockaddr_in6 test6;
-
-    if (inet_pton(AF_INET, ip, &test4.sin_addr) == 1) {
+    
+    if (ip == NULL) {
+         return setup_ipv4_socket(ip, port, message); // default to IPv4 wildcard
+    
+    }else if (inet_pton(AF_INET, ip, &test4.sin_addr) == 1) {
         return setup_ipv4_socket(ip, port, message);
     }
     else if (inet_pton(AF_INET6, ip, &test6.sin6_addr) == 1) {
@@ -153,7 +165,7 @@ int create_socket_from_ip(const char *ip, int port, const char *message) {
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        fprintf(stderr, "Usage: %s <destination IP> <PORT number>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <local IP> <local PORT>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 

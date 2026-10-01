@@ -65,51 +65,32 @@ static int print_sanitized(const char *data, size_t len) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 5) {
-        fprintf(stderr, "Usage: %s <local IP> <local PORT> <server IP> <server PORT>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <server IP> <server PORT>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    int local_port = check_port(argv[2]);
-    if (local_port < 0) {
-        fprintf(stderr, "[-]PORT (must be 1-65535)\n");
-        exit(EXIT_FAILURE);
-    }
-    int server_port  = check_port(argv[4]);
+    int server_port  = check_port(argv[2]);
     if (server_port < 0) {
         fprintf(stderr, "[-]PORT (must be 1-65535)\n");
         exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_storage local_addr, server_addr;
-    socklen_t local_addr_len, server_addr_len;
+    struct sockaddr_storage server_addr;
+    socklen_t  server_addr_len;
 
-    if (check_IP_version(argv[1], local_port, &local_addr, &local_addr_len) < 0) {
-        fprintf(stderr, "[-] Invalid local IP address\n");
-        exit(EXIT_FAILURE);
-    }
-    if (check_IP_version(argv[3], server_port, &server_addr, &server_addr_len) < 0) {
+    if (check_IP_version(argv[1], server_port, &server_addr, &server_addr_len) < 0) {
         fprintf(stderr, "[-] Invalid server IP address\n");
         exit(EXIT_FAILURE);
     }
-    if (server_addr.ss_family != local_addr.ss_family) {
-        fprintf(stderr, "[-] Local IP and server IP must be the same version (both IPv4 or both IPv6)\n");
-        exit(EXIT_FAILURE);
-    }
-
+  
     
-    int sockfd = socket(local_addr.ss_family, SOCK_DGRAM, 0);
+    int sockfd = socket(server_addr.ss_family, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         perror("[-] SOKCET");
         exit(EXIT_FAILURE);
     }
 
-    
-    if (bind(sockfd, (struct sockaddr *)&local_addr, local_addr_len) < 0) {
-        perror("[-] BIND");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
 
     if (connect(sockfd, (struct sockaddr *)&server_addr, server_addr_len) < 0) {
         perror("[-] CONNECT");
