@@ -61,7 +61,7 @@ int setup_ipv4_socket(const char *ip, int port, const char *message) {
         close(sockfd);
         return -1;
     }
-    printf("Listening on %s:%d via IPv4...\n", ip, port);
+    printf("Listening on %s:%d via IPv4...\n", ip ? ip : "0.0.0.0", port);
  
     struct sockaddr_in client;
     socklen_t client_len = sizeof(client);
@@ -116,7 +116,7 @@ int setup_ipv6_socket(const char *ip, int port, const char *message) {
         close(sockfd);
         return -1;
     }
-    printf("Listening on %s:%d via IPv6...\n", ip, port);
+    printf("Listening on %s:%d via IPv6...\n", ip ? ip : "0.0.0.0", port);
  
     struct sockaddr_in6 client;
     socklen_t client_len = sizeof(client);
