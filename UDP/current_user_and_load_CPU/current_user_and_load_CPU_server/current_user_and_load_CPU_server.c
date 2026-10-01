@@ -10,6 +10,7 @@
 #include <ctype.h>
 
 #define BUFFSIZE 1024
+#define AUTH_TOKEN "ScioVSIOwQzXCBY26538"
 
 typedef struct current_load {
    int current_user;
@@ -155,6 +156,15 @@ int main(int argc, char** argv) {
     }
 
     fprintf(stdout, "recv bytes...: %d\n",recv);
+
+    buff[recv] = '\0';
+    while (recv > 0 && (buff[recv - 1] == '\n' || buff[recv - 1] == '\r'))
+        buff[--recv] = '\0';            // ignore trailing newline from nc 
+
+    if (strcmp(buff, AUTH_TOKEN) != 0) {
+        fprintf(stderr, "[-] Wrong or missing token, request ignored\n");
+        continue;                       // no reply to unauthenticated senders 
+    }
 
     updateLoadStats(pStats);
 
