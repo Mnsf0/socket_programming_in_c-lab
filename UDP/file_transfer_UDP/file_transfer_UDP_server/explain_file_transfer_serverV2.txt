@@ -1,0 +1,72 @@
+### 1-CWE 696:
+Incorrect Behavior Order
+This vulnerability does not mean a check is missing, It means a check exists but runs too late after a decision has already been made based on untrusted input.
+
+### where it happens? 
+in the code there's two loops, the first one for authentication and the other one for send data, simply after the server check the token and goes to the next loop to start transfer the file.
+
+```c
+while (n) {
+    gettimeofday(&t_now, NULL);
+
+    if (n == -1) {
+      if (errno == EINTR) {
+        l = sizeof(struct sockaddr_storage);
+        n = recvfrom(sfd, &buf, BUFFERT, 0, (struct sockaddr *)&clt, &l);
+        continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        fprintf(stderr, "Connection timed out (no data for %d s)\n", IDLE_LIMIT);
+      else
+        perror("read fails");
+      exit(EXIT_FAILURE);
+     }
+
+    if (duration(&t_last, &t_now, &t_delta) == -1 || t_delta.tv_sec >= IDLE_LIMIT) {
+      fprintf(stderr, "Connection not valid (idle too long or clock error)\n");
+      exit(EXIT_FAILURE);
+     }
+
+    if (!same_client(&clt, &auth_clt)) {
+      fprintf(stderr, "Datagram from another sender ignored\n");
+      l = sizeof(struct sockaddr_storage);
+      n = recvfrom(sfd, &buf, BUFFERT, 0, (struct sockaddr *)&clt, &l);
+      continue;
+     }
+```
+
+
+### how it happened? 
+client 1 send file to server, in the same time while the file is transfers another client( the attacker) send an empty file to the same port for the server.
+
+### What exactly happened?
+the first file send by client 1 dropped and stop the transfer operation, and that's clear on the server side, but for client 1 everything is going okay, they didn't notice or get notify by any change that there connection get corrupted.
+
+### How to fix it
+Change 1: while (n) → while (1)
+
+The original condition while (n) means the loop checks the value of n every iteration before doing anything inside. When n == 0 the loop exits immediately at that line, skipping everything below it including same_client(). Changing it to while (1) makes the loop run unconditionally, so nothing can exit it before same_client() gets a chance to run.
+
+Change 2: if (n == 0) break; added after same_client()
+
+Since we removed n == 0 from the loop condition, we need to put the EOF check back somewhere — but now after same_client().
+
+---------------------------------------------------------------
+
+# CWE-770
+Allocation of Resources Without Limits or Throttling
+This vulnerability does not mean you forgot to write data to disk. It means you write to disk without ever checking how much you have already written, so an authenticated client can keep sending data forever and the server will keep accepting it with no limit until the disk is completely full.
+
+### Where it happens?
+Inside the transfer loop, after the server has verified the client and is receiving file chunks, these two lines run with no size check at all:
+count += n;
+write(fd, buf, n);
+count grows by n bytes on every packet and nothing ever compares it against a maximum. The loop will keep writing as long as the client keeps sending, no matter how large the total gets.
+### How it happened?
+Client 1 authenticates successfully and starts sending a large file. The server enters the transfer loop and keeps writing every chunk to disk. Client 1 never sends the empty EOF datagram — it just keeps sending chunk after chunk with no end. The server has no way to stop it because there is no rule that says "after X bytes, refuse the rest."
+### What exactly happened?
+The disk fills completely. When that happens write() starts returning -1 with errno = ENOSPC (no space left on device), but because the return value is never checked the server does not know this is happening. It keeps looping, calling write(), and printing the received byte count as if everything is fine.
+
+Every other process on the machine that tries to write anything — system logs, other programs, the OS itself — also gets ENOSPC and fails. This causes cascading failures across services that have nothing to do with the file transfer.
+At the end the server prints "Total number of bytes transferred : X" and exits with code 0, reporting a completely successful transfer of a file that is actually truncated or partially missing on disk. There is no error message on either side.
+
