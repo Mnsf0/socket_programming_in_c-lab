@@ -11,6 +11,22 @@
 #define MAX_MSG_SIZE 256
 #define RECV_TIMEOUT_SEC 10
 
+static int parse_port(const char *arg) {
+    char *endptr;
+    errno = 0;
+    long val = strtol(arg, &endptr, 10);
+
+    if (errno != 0 || *endptr != '\0' || endptr == arg) {
+        fprintf(stderr, "[-]Invalid port: '%s' is not a number\n", arg);
+        return -1;
+    }
+    if (val < 1 || val > 65535) {
+        fprintf(stderr, "[-]Invalid port: %ld (must be 1-65535)\n", val);
+        return -1;
+    }
+    return (int)val;
+}
+
 int main(int argc, char** argv) {
 
     if (argc != 2) {
@@ -18,7 +34,7 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    int port = atoi(argv[1]);
+    int port = parse_port(argv[1]);
 
     int sockdf = socket(AF_INET, SOCK_STREAM, 0);
     if (sockdf == -1) {
