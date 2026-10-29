@@ -35,6 +35,11 @@ int main() {
     
     size_t cap = INITIAL_BUF_SIZE;
     size_t total = 0;
+/* hello that's me from the future, after I get some experince 
+ * in socket I know that's using heap to recv the message isn't really good idea,
+ * but I will keep it as it is for now because this help the idea of my project 
+ * which showing how I'm getting better at sockets
+ * */
     char *buf = malloc(cap); // using heap
 
     if (buf == NULL) {
