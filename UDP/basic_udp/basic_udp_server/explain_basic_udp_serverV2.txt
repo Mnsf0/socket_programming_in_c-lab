@@ -1,0 +1,160 @@
+### CWE-670: Always-Incorrect Control Flow Implementation
+
+### 1- What this vulnerability does
+
+Preprocessor macros perform text substitution before compilation. Defining a macro that wraps a function call causes that function to re-execute every single time the macro name is referenced in code, resulting in redundant string processing, unnecessary CPU cycles, and unexpected execution side effects.
+
+### 2- Where at V1 happened
+
+Inside main() in basic_udp_server.c, defined as: #define PORT check_port(argv[2]).
+
+### 3- How to fix it
+
+Remove the preprocessor macro and evaluate check_port(argv[2]) once into a local variable inside main(). Validate the stored result before passing it to downstream functions.
+
+### 4- Snippet added to fix this vulnerability
+
+```c
+int port = check_port(argv[2]);
+if(port < 0){
+    fprintf(stderr,"[-]PORT: %s (it should be between 1-65535)\n",argv[2]);
+    exit(EXIT_FAILURE);
+}
+
+```
+
+---
+
+### CWE-20: Improper Input Validation
+
+### 1- What this vulnerability does
+
+Standard string-to-long conversion functions like strtol() automatically skip leading whitespace and permit + or - signs and leading zeros. Without prior string checks, malformed inputs (e.g., -154, +8080, or numbers with leading zeros) pass parsing checks as valid integers.
+
+### 2- Where at V1 happened
+
+Inside the check_port() function in basic_udp_server.c, where argv[2] was passed straight into strtol() without prior character inspection.
+
+### 3- How to fix it
+
+Add an explicit character validation step before strtol() to ensure the input starts with a non-zero digit, rejecting signs, whitespace, and leading zero formats.
+
+### 4- Snippet added to fix this vulnerability
+
+```c
+if(!isdigit((unsigned char)port[0]) || port[0] == '0'){
+    return -1;
+}
+
+```
+
+---
+
+### CWE-382: J2EE Bad Practices: Use of System.exit()
+
+### 1- What this vulnerability does
+
+Invoking process termination routines directly inside lower-level utility functions forces an immediate shutdown of the process. This prevents caller functions like main() from recovering, performing clean-up operations, or printing contextual error information.
+
+### 2- Where at V1 happened
+
+Inside check_port() in basic_udp_server.c, where exit(1) was called directly when invalid port conditions were detected.
+
+### 3- How to fix it
+
+Replace exit(1) calls inside helper functions with error return codes (-1), delegating process management and cleanup decisions back to main().
+
+### 4- Snippet added to fix this vulnerability
+
+```c
+if(errno != 0 || *endptr != '\0' || endptr == port){
+    fprintf(stderr, "[-]PORT\n");
+    return -1;
+}  
+if(val < 1 || val > 65535){
+    fprintf(stderr, "[-]PORT\n");
+    return -1;
+}
+
+```
+
+---
+
+### CWE-696: Incorrect Behavior Order
+
+### 1- What this vulnerability does
+
+Executes network socket calls out of standard order. Invoking sendto() immediately after creating a socket causes the application to behave as a blind outbound sender instead of binding to a local port and listening for client traffic.
+
+### 2- Where at V1 happened
+
+Inside setup_ipv4_socket(), setup_ipv6_socket(), and create_socket_from_ip() in basic_udp_server.c.
+
+### 3- How to fix it
+
+Configure socket options using SO_REUSEADDR, bind the socket to the port using bind(), and invoke recvfrom() to wait for an incoming datagram before sending a response back to the client using sendto().
+
+### 4- Snippet added to fix this vulnerability
+
+```c
+int yes = 1;
+setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+if (bind(sockfd, (struct sockaddr *)&addr4, sizeof(addr4)) < 0) {
+    perror("[-]bind (IPv4/UDP)");
+    close(sockfd);
+    return -1;
+}
+printf("Listening on %s:%d via IPv4...\n", ip ? ip : "0.0.0.0", port);
+
+struct sockaddr_in client;
+socklen_t client_len = sizeof(client);
+char buf[1024];
+ssize_t n = recvfrom(sockfd, buf, sizeof(buf) - 1, 0,
+                      (struct sockaddr *)&client, &client_len);
+if (n < 0) {
+    perror("[-]recvfrom (IPv4/UDP)");
+    close(sockfd);
+    return -1;
+}
+buf[n] = '\0';
+printf("Received %zd bytes from client: %s\n", n, buf);
+
+ssize_t sent = sendto(sockfd, message, strlen(message), 0,
+                       (struct sockaddr *)&client, client_len);
+
+```
+
+---
+
+### CWE-476: NULL Pointer Dereference
+
+### 1- What this vulnerability does
+
+Passes an unverified pointer directly into network conversion routines like inet_pton(). If ip is NULL, conversion fails, preventing the program from assigning a default wildcard socket address (INADDR_ANY / 0.0.0.0) to listen across all network interfaces.
+
+### 2- Where at V1 happened
+
+Inside create_socket_from_ip() and setup_ipv4_socket() in basic_udp_server.c, where ip was passed to inet_pton() without checking if ip == NULL.
+
+### 3- How to fix it
+
+Add explicit NULL pointer checks. When ip is NULL, set the address to INADDR_ANY to enable wildcard binding.
+
+### 4- Snippet added to fix this vulnerability
+
+```c
+// Inside create_socket_from_ip:
+if (ip == NULL) {
+     return setup_ipv4_socket(ip, port, message); // default to IPv4 wildcard
+}
+
+// Inside setup_ipv4_socket:
+if (ip == NULL) {
+  addr4.sin_addr.s_addr = INADDR_ANY;
+} else if (inet_pton(AF_INET, ip, &addr4.sin_addr) != 1) {
+    fprintf(stderr, "setup_ipv4_socket: invalid IPv4 address\n");
+    return -1;
+}
+
+```
