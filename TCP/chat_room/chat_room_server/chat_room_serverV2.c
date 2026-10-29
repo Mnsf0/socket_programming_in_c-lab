@@ -38,12 +38,7 @@ static int send_all(int fd, const char *buf, size_t len){
   return 0;
 }
 
-void* check_addr(struct sockaddr* sa) {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*) sa)->sin_addr);
-    }
-    return &(((struct sockaddr_in6*) sa)->sin6_addr);
-}
+
 
 static const char *server_token;
 static size_t token_len;
